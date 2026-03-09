@@ -1,7 +1,8 @@
 [package]
-name = "tokio"
+name = "actix"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-tokio = {version = "1.50", features=["full"]}
+actix-web = "4.13.0"
+tokio = "1.50.0"

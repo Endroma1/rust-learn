@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-indicatif = "18.4"
+indicatif = "0.18.4"

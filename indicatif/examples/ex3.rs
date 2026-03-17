@@ -4,44 +4,59 @@ use std::{
     time::Duration,
 };
 
-use indicatif::ProgressBar;
+use indicatif::{MultiProgress, ProgressBar};
 
 type DynError = Box<dyn std::error::Error + Send + Sync>;
 type Result<T> = std::result::Result<T, DynError>;
 
 /// Program that has a progress bar that is not created by the iterating process but rather reads
-/// from a state API. Uses message passing with mpsc to communicate state between frontend and
+/// from a state API. This allows for easier control over multiprogress as the progressbar can be
+/// used without the function having to implement it.
+///
+/// Uses message passing with crossbeam to communicate state between frontend and
 /// backend.
 
 const ITERATIONS: usize = 100;
 const INTERVAL: Duration = Duration::from_millis(100);
+const PROGRESSBARS: usize = 4;
 
 fn main() -> Result<()> {
-    let process = Process::new(ITERATIONS);
+    let mut handles = Vec::new();
+    let multi = MultiProgress::new();
+    for _ in 1..=PROGRESSBARS {
+        let process = Process::new(ITERATIONS);
+        let proc_handle = process.spawn();
 
-    let handle = process.spawn();
+        let bar = ProgressBar::new(0);
+        multi.add(bar.clone());
 
-    // ProgressBar is initiablized on first iteration.
-    let mut bar = None;
+        let view_handle = progressbar_frontend(&bar, proc_handle.state);
 
-    // Get the len from the process to simulate a situation where it is not obvious.
-    while let Ok(s) = handle.state.recv() {
-        match s {
-            State::Init { total } => {
-                let b = bar.get_or_insert_with(|| ProgressBar::new(total as u64));
-                b.tick();
-            }
-            State::InProgress { delta } => {
-                let b = bar.clone().expect("Got InProgress message before Init");
-                b.tick();
-                b.inc(delta as u64);
-            }
-            State::Stopped => break,
-        }
+        handles.push(view_handle);
+        handles.push(proc_handle.join_handle);
     }
-
-    handle.join_handle.join().unwrap();
+    handles.into_iter().for_each(|h| h.join().unwrap());
     Ok(())
+}
+
+fn progressbar_frontend(bar: &ProgressBar, rec: Receiver<State>) -> JoinHandle<()> {
+    let bar = bar.clone();
+    thread::spawn(move || {
+        // Get the len from the process to simulate a situation where it is not obvious.
+        while let Ok(s) = rec.recv() {
+            match s {
+                State::Init { total } => {
+                    bar.set_length(total as u64);
+                    bar.tick();
+                }
+                State::InProgress { delta } => {
+                    bar.tick();
+                    bar.inc(delta as u64);
+                }
+                State::Stopped => break,
+            }
+        }
+    })
 }
 
 pub struct Process {

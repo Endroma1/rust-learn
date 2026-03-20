@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::mpsc::Sender};
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
@@ -9,11 +9,11 @@ pub enum Message {
     /// winner or draw is reached.
     Place {
         index: usize,
-        result: Sender<Result<Option<GameResult>, InsertError>>,
+        result: oneshot::Sender<Result<Option<GameResult>, InsertError>>,
     },
-    CurrentTurn(Sender<Player>),
+    CurrentTurn(oneshot::Sender<Player>),
     /// Get the board for rendering.
-    Board(Sender<Board>),
+    Board(oneshot::Sender<Board>),
     Quit,
 }
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]

@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    sync::mpsc::{Sender, channel},
-};
+use std::fmt::Display;
 
 use actix_web::{
     App, HttpResponse, HttpServer, Responder, Result,
@@ -10,16 +7,16 @@ use actix_web::{
     http::StatusCode,
     post, web,
 };
-use common::tic_tac_toe::{board::InsertError, common::Message, spawn_game_tokio};
+use common::tic_tac_toe::{board::InsertError, game::Game};
 use serde::{Deserialize, Serialize};
 use tokio::task::spawn_blocking;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let (handle, tx) = spawn_game_tokio();
+    let game = Game::new();
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(State::new(tx.clone())))
+            .app_data(web::Data::new(State::new(game.clone())))
             .service(turn)
             .service(board)
             .service(quit)
@@ -29,33 +26,24 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await?;
 
-    handle.await?;
     Ok(())
 }
 
 pub struct State {
-    pub game_api: Sender<Message>,
+    pub game: Game,
 }
 impl State {
-    pub fn new(api: Sender<Message>) -> Self {
-        Self { game_api: api }
+    pub fn new(game: Game) -> Self {
+        Self { game: game }
     }
 }
 
 #[get("/turn")]
 async fn turn(state: web::Data<State>) -> Result<impl Responder> {
-    let current_turn = spawn_blocking(move || -> Result<_, Error> {
-        let (tx, rx) = channel();
-
-        state
-            .game_api
-            .send(Message::CurrentTurn(tx))
-            .map_err(|_| Error::GameQuit)?;
-        let current_turn = rx.recv().unwrap();
-        Ok(current_turn)
-    })
-    .await
-    .unwrap()?;
+    let current_turn =
+        spawn_blocking(move || -> Result<_, Error> { Ok(state.game.current_turn()) })
+            .await
+            .unwrap()?;
 
     let resp = HttpResponse::Ok().body(current_turn.to_string());
     Ok(resp)
@@ -63,23 +51,15 @@ async fn turn(state: web::Data<State>) -> Result<impl Responder> {
 
 #[post("/quit")]
 async fn quit(state: web::Data<State>) -> impl Responder {
-    let _ = state.game_api.send(Message::Quit);
+    state.game.quit();
     HttpResponse::new(StatusCode::OK)
 }
 
 #[get("/board")]
 async fn board(state: web::Data<State>) -> Result<impl Responder> {
-    let board = spawn_blocking(move || -> Result<_, Error> {
-        let (tx, rx) = channel();
-        state
-            .game_api
-            .send(Message::Board(tx))
-            .map_err(|_| Error::GameQuit)?;
-        let board = rx.recv().unwrap();
-        Ok(board)
-    })
-    .await
-    .unwrap()?;
+    let board = spawn_blocking(move || -> Result<_, Error> { Ok(state.game.board()) })
+        .await
+        .unwrap()?;
 
     Ok(web::Json(board))
 }
@@ -89,20 +69,9 @@ async fn place(
     req_body: web::Json<PlaceRequest>,
     state: web::Data<State>,
 ) -> Result<impl Responder> {
-    let res = spawn_blocking(move || -> Result<_, Error> {
-        let (tx, rx) = channel();
-        state
-            .game_api
-            .send(Message::Place {
-                index: req_body.index,
-                result: tx,
-            })
-            .map_err(|_| Error::GameQuit)?;
-        let res = rx.recv().map_err(|_| Error::GameQuit)?;
-        Ok(res)
-    })
-    .await
-    .unwrap()?;
+    let res = spawn_blocking(move || -> Result<_, Error> { Ok(state.game.place(req_body.index)) })
+        .await
+        .unwrap()?;
     Ok(web::Json(res))
 }
 
